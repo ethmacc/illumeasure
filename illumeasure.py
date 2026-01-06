@@ -35,17 +35,32 @@ class FtdiContext:
     self.__assertFtdi("set_baudrate", ftdi.set_baudrate(self.ftdi, 9600))
     self.__assertFtdi("set_line_property", ftdi.set_line_property(self.ftdi, ftdi.BITS_7, ftdi.STOP_BIT_1, ftdi.EVEN))      
 
-  def writeData(self, data):
+  def writeData(self, data:str):
+    '''
+    Writes data to device using the ftdi library. Returns the response from the device
+    
+    :param data: String containing the data formatted as bytes
+    :type data: str
+    '''
     ret = ftdi.write_data(self.ftdi, data)
     self.__assertFtdi("write_data", ret)
     return ret
 
-  def readData(self, length):
+  def readData(self, length:int):
+    '''
+    Reads data from the device using the ftdi library. Returns the data in bytes
+    
+    :param length: Length of the data as an integer
+    :type length: int
+    '''
     ret, d = ftdi.read_data(self.ftdi, length)
     self.__assertFtdi("read_data", ret)
     return d
   
   def endConnection(self):
+    '''
+    Closes the connection to the device and cleans up.
+    '''
     self.__assertFtdi("usb_close", ftdi.usb_close(self.ftdi))
     ftdi.free(self.ftdi)
     print("Device closed")
@@ -63,29 +78,67 @@ class Messenger:
   class EEPROMError(Exception): pass
   class LowBatteryError(Exception): pass #TODO: consider discarding most recent measurement when this error is raised
   
-  def computeBcc(i):
+  def computeBcc(i:str):
+    '''
+    Computes result for the BCC Check by XORing the message bytes from start to end
+    
+    :param i: input bytes
+    :type i: str
+    '''
     bytes = map(ord, i)
     res = reduce(lambda x, y: x ^ y, bytes)
     return "%02x" % res
 
-  def messageEncodeShort(self, receptorHead, command, parameter):
+  def messageEncodeShort(self, receptorHead:str, command:str, parameter:str):
+    '''
+    Encode a message using the short communication format
+    
+    :param receptorHead: The number (formatted as a STRING) corresponding to an individual receptor head as set using the rotary switch
+    :type receptorHead: str
+    :param command: The command number (formatted as a STRING)
+    :type command: str
+    :param parameter: The 4-digit parameter code (formatted as a STRING)
+    :type parameter: str
+    '''
     bccable = ("%02d" % receptorHead) + command + parameter + "\x03" # 0x03 for ETX
     bccResult = self.computeBcc(bccable)
     return "\x02" + bccable + bccResult + "\x0D\x0A" # \x02 for STX, \x0D for CR, \x0A for LF
 
-  def __assertBcc(self, bccable, actualBcc, i):
+  def __assertBcc(self, bccable:str, actualBcc:str, i:str):
+    '''
+    Carries out the BCC Check between the actual and expected BCC
+    
+    :param bccable: The portion of the message bytestring to be BCCed
+    :type bccable: str
+    :param actualBcc: The actual BCC as sliced from the message
+    :type actualBcc: str
+    :param i: The full message bytestring
+    :type i: str
+    '''
     expectedBcc = self.computeBcc(bccable)
     if int(actualBcc, 16) != int(expectedBcc, 16):
       raise self.BCCException("BCC check failed, expected BCC '%s', got '%s', received '%s'." % (expectedBcc, actualBcc, i))
 
-  def messageDecodeShort(self, i):
+  def messageDecodeShort(self, i:str):
+    '''
+    Decodes a message in the short communication format
+    
+    :param i: The message bytestring to be decoded
+    :type i: str
+    '''
     self.__assertBcc(i[1:10], i[10:12], i)
     receptorHead = int(i[1:3])
     command = i[3:5]
     parameter = i[5:9]
     return (receptorHead, command, parameter)
 
-  def messageDecodeLong(self, i):
+  def messageDecodeLong(self, i:str):
+    '''
+    Decodes a message in the long communication format
+    
+    :param i: The message bytestring to be decoded
+    :type i: str
+    '''
     def dataToNumber(i):
       if i == "      ":
         return None
@@ -103,7 +156,17 @@ class Messenger:
     data3 = dataToNumber(i[21:27])
     return (receptorHead, command, status, (data1, data2, data3))
 
-  def sendShort(self, receptorHeadNumber, command, parameter):
+  def sendShort(self, receptorHeadNumber:str, command:str, parameter:str):
+    '''
+    Send a message using the short communication format
+    
+    :param receptorHeadNumber: The number (formatted as a STRING) corresponding to an individual receptor head as set using the rotary switch
+    :type receptorHeadNumber: str
+    :param command: The command number (formatted as a STRING)
+    :type command: str
+    :param parameter: The 4-digit parameter code (formatted as a STRING)
+    :type parameter: str
+    '''
     encoded = self.messageEncodeShort(receptorHeadNumber, command, parameter)
     ret = self.ftdic.writeData(encoded)
     if ret < 0:
@@ -113,6 +176,12 @@ class Messenger:
       print('ftdi_write_data wrote %d bytes' % ret)
   
   def checkStatus(self, decoded:tuple):
+    '''
+    Check the returned message for status updates, including errors and battery level
+    
+    :param decoded: Decoded message
+    :type decoded: tuple
+    '''
     status = str(decoded[2])
 
     #Check for errors
@@ -136,12 +205,18 @@ class Messenger:
       raise self.LowBatteryError("Low battery, change battery immediately and discard most recent measurement")
 
   def receiveShort(self):
+    '''
+    Receives a message from the device in the short communication format and checks for status updates. Returns the decoded message
+    '''
     encoded = self.ftdic.readData(self.__messageLengthShort)
     decoded = self.messageDecodeShort(encoded)
     self.checkStatus(decoded)
     return decoded
 
   def receiveLong(self):
+    '''
+    Receives a message from the device in the long communication format and checks for status updates. Returns the decoded message
+    '''
     encoded = self.ftdic.readData(self.__messageLengthLong)
     decoded =  self.messageDecodeLong(encoded)
     self.checkStatus(decoded)
@@ -160,9 +235,9 @@ class Protocol:
     '''
     Executes command 54 to set the T-10A to PC connection mode
     '''
-    self.messenger.sendShort(0, "54", "1   ")
+    self.messenger.sendShort("00", "54", "1   ")
     responseActual = self.messenger.receiveShort()
-    responseExpected = (0, "54", "    ")
+    responseExpected = ("00", "54", "    ")
     if responseActual != responseExpected:
       raise Protocol('wrong PcConnectionMode response, expected "%s", got "%s".' % (responseExpected, responseActual))
     time.sleep(0.5)
@@ -223,7 +298,7 @@ class Protocol:
       self.messenger.sendShort("99", "55", "0  0")
     time.sleep(0.5)
   
-  def clearPastIntegratedData(self, receptorHeadNumber:int):
+  def clearPastIntegratedData(self, receptorHeadNumber:int): #TODO: Integrated data collection functions still WIP
     '''
     Executes command 28 to clear integration data stored in the T-10A
     
