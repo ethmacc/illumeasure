@@ -326,11 +326,6 @@ def main():
       protocol.readMeasurementData(0, hold=False, ccf=False, range="auto") # set measurement conditions
       time.sleep(3) # 3s for Auto and 1s for Manual
       protocol.readMeasurementData(0, hold=False, ccf=False, range="auto") # Take a measurement with the same settings. Loop command to take multiple measurments
-      
-      protocol.setHoldStatus(True)
-      protocol.clearPastIntegratedData(0)
-
-      #TODO: Add implemented commands in order as stated in manual
 
     except Exception as e:
       print(str(e), file=sys.stderr)
