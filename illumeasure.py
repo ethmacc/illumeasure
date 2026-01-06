@@ -9,7 +9,6 @@ import os
 import sys
 import ftdi1 as ftdi
 import time
-import pandas as pd
 from functools import reduce
 
 
@@ -239,15 +238,15 @@ class Protocol:
     responseActual = self.messenger.receiveShort()
     responseExpected = ("00", "54", "    ")
     if responseActual != responseExpected:
-      raise Protocol('wrong PcConnectionMode response, expected "%s", got "%s".' % (responseExpected, responseActual))
+      raise self.ProtocolException('wrong PcConnectionMode response, expected "%s", got "%s".' % (responseExpected, responseActual))
     time.sleep(0.5)
 
-  def readMeasurementData(self, receptorHeadNumber:int, hold:bool, ccf:bool, range):
+  def readMeasurementData(self, receptorHeadNumbers:tuple, hold:bool, ccf:bool, range):
     '''
     Executes command 10 to read measurement data or set the inital measurement conditions.
     
-    :param receptorHeadNumber: The integer number corresponding to an individual receptor head as set using the rotary switch
-    :type receptorHeadNumber: int
+    :param receptorHeadNumber: A tuple containing the integer numbers corresponding to each receptor head
+    :type receptorHeadNumber: tuple
     :param hold: Set the HOLD function to HOLD (True) or RUN (False)
     :type hold: bool
     :param ccf: Toggle Colour Correction Factor (CCF) function ENABLED (True) or DISABLED (False)
@@ -280,9 +279,16 @@ class Protocol:
       else:
         raise ValueError("Error invalid range setting")
     
-    #TODO: Suggest adding loop here and allowing a iterable input to readMeasurmentData from multiple heads
-    self.messenger.sendShort(f"{receptorHeadNumber:02d}", "10", holdCode + ccfCode + rangeCode + "0")
-    self.messenger.receiveLong()
+    for receptorHeadNumber in receptorHeadNumbers:
+      self.messenger.sendShort(f"{receptorHeadNumber:02d}", "10", holdCode + ccfCode + rangeCode + "0")
+      receivedMessage = self.messenger.receiveLong() #(receptorHead, command, status, (data1, data2, data3))
+      receivedData = receivedMessage[3]
+      if receivedMessage[0] == receptorHeadNumber:
+        with open(f"Receptor{receptorHeadNumber:02d}_data.csv", "a") as f:
+          f.write(f"{receivedData[0]}, {receivedData[1]}, {receivedData[2]}\n")
+      else:
+        raise self.ProtocolException("Returned receptor head number did not match!")
+      
     time.sleep(0.5)
     
   def setHoldStatus(self, hold:bool):
@@ -319,13 +325,14 @@ def main():
       Ftdic = FtdiContext()
       messenger = Messenger(Ftdic)
       protocol = Protocol(messenger)
+      receptors = (0)
 
       protocol.switchToPcConnectionMode()
       #TODO: Clear send and receive buffers - how??
 
-      protocol.readMeasurementData(0, hold=False, ccf=False, range="auto") # set measurement conditions
+      protocol.readMeasurementData(receptors, hold=False, ccf=False, range="auto") # set measurement conditions
       time.sleep(3) # 3s for Auto and 1s for Manual
-      protocol.readMeasurementData(0, hold=False, ccf=False, range="auto") # Take a measurement with the same settings. Loop command to take multiple measurments
+      protocol.readMeasurementData(receptors, hold=False, ccf=False, range="auto") # Take a measurement with the same settings. Loop command to take multiple measurments
 
     except Exception as e:
       print(str(e), file=sys.stderr)
